@@ -1,0 +1,38 @@
+---
+- name: Déploiement de l'API FastAPI
+  hosts: local
+  become: false
+
+  vars:
+    app_dir: "/home/{{ ansible_user }}/mon-projet-devsecops"
+    image_tag: "latest"
+
+  tasks:
+    - name: Copier le docker-compose.yml
+      copy:
+        src: "{{ playbook_dir }}/../docker-compose.yml"
+        dest: "{{ app_dir }}/docker-compose.yml"
+
+    - name: Arrêter l'ancienne version
+      shell: docker compose down
+      args:
+        chdir: "{{ app_dir }}"
+      ignore_errors: true
+
+    - name: Lancer la nouvelle version
+      shell: docker compose up -d
+      args:
+        chdir: "{{ app_dir }}"
+
+    - name: Vérifier que l'API répond
+      uri:
+        url: "http://localhost:8000/health"
+        return_content: yes
+      register: result
+      retries: 5
+      delay: 5
+      until: result.status == 200
+
+    - name: Afficher le statut
+      debug:
+        msg: "API déployée et opérationnelle : {{ result.content }}"
