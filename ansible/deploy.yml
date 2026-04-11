@@ -4,7 +4,7 @@
   become: false
 
   vars:
-    app_dir: "/home/khevin/mon-projet-devsecops"
+    app_dir: "/var/jenkins_home/workspace/mon-projet-devsecops"
     image_tag: "latest"
 
   tasks:
@@ -15,7 +15,7 @@
       ignore_errors: true
 
     - name: Lancer la nouvelle version
-      shell: docker compose up -d --build
+      shell: docker compose up -d
       args:
         chdir: "{{ app_dir }}"
 
@@ -37,4 +37,4 @@
 
     - name: Afficher le statut
       debug:
-        msg: "API déployée et opérationnelle : {{ result.content }}"
+        msg: "API déployée : {{ result.content }}"
