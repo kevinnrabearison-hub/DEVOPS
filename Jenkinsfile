@@ -87,6 +87,8 @@ pipeline {
                         --format table \
                         --output trivy-report.txt \
                         --exit-code 0 \
+                        --skip-db-update \
+                        --cache-dir /var/jenkins_home/.cache/trivy \
                         ${IMAGE_NAME}:${IMAGE_TAG}
                     cat trivy-report.txt
                 '''
