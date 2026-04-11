@@ -14,7 +14,7 @@ pipeline {
         stage('SAST — Bandit') {
             steps {
                 sh '''
-                    echo "=== Scan du code source avec Bandit ==="
+                    echo "=== Bandit ==="
                     bandit -r src/ -f txt -o bandit-report.txt || true
                     cat bandit-report.txt
                 '''
@@ -29,15 +29,12 @@ pipeline {
         stage('Secrets — Gitleaks') {
             steps {
                 sh '''
-                    echo "=== Scan des secrets avec Gitleaks ==="
-                    docker run --rm \
-                        -v $(pwd):/path \
+                    echo "=== Gitleaks ==="
+                    docker run --rm -v $(pwd):/path \
                         zricethezav/gitleaks:latest \
                         detect --source /path --no-git \
                         --report-format json \
-                        --report-path /path/gitleaks-report.json \
-                        || true
-                    echo "Scan Gitleaks terminé"
+                        --report-path /path/gitleaks-report.json || true
                 '''
             }
             post {
@@ -47,55 +44,73 @@ pipeline {
             }
         }
 
-        stage('Tests') {
+        stage('Tests + Coverage') {
             steps {
                 sh '''
-                    echo "=== Lancement des tests pytest ==="
+                    echo "=== Tests ==="
                     pip3 install -r requirements.txt -r requirements-dev.txt \
                         --break-system-packages -q
-                    python3 -m pytest tests/ -v \
-                        --junitxml=test-results.xml
+
+                    pytest tests/ -v \
+                        --junitxml=test-results.xml \
+                        --cov=src --cov-report=xml
                 '''
             }
             post {
                 always {
                     junit 'test-results.xml'
+                    archiveArtifacts artifacts: 'coverage.xml', allowEmptyArchive: true
                 }
             }
         }
 
-        stage('Build image Docker') {
+        stage('Dependency Scan') {
             steps {
                 sh '''
-                    echo "=== Build de l image Docker ==="
-                    docker build \
-                        -f docker/Dockerfile \
-                        -t ${IMAGE_NAME}:${IMAGE_TAG} \
-                        -t ${IMAGE_NAME}:latest \
-                        .
-                    echo "Image buildée : ${IMAGE_NAME}:${IMAGE_TAG}"
+                    echo "=== Safety scan ==="
+                    pip install safety
+                    safety check -r requirements.txt || true
                 '''
             }
         }
 
-        stage('Scan image — Trivy') {
+        stage('Build Docker Image') {
             steps {
                 sh '''
-                    echo "=== Scan de l image avec Trivy ==="
+                    echo "=== Build Docker ==="
+                    docker build \
+                        -f docker/Dockerfile \
+                        -t ${IMAGE_NAME}:${IMAGE_TAG} \
+                        -t ${IMAGE_NAME}:latest .
+                '''
+            }
+        }
+
+        stage('Scan Image — Trivy (STRICT)') {
+            steps {
+                sh '''
+                    echo "=== Trivy scan ==="
                     trivy image \
                         --severity HIGH,CRITICAL \
-                        --format table \
-                        --output trivy-report.txt \
-                        --exit-code 0 \
-                        --skip-db-update \
-                        --cache-dir /var/jenkins_home/.cache/trivy \
+                        --exit-code 1 \
+                        --no-progress \
                         ${IMAGE_NAME}:${IMAGE_TAG}
-                    cat trivy-report.txt
+                '''
+            }
+        }
+
+        stage('SBOM') {
+            steps {
+                sh '''
+                    echo "=== SBOM (Syft) ==="
+                    docker run --rm \
+                        -v /var/run/docker.sock:/var/run/docker.sock \
+                        anchore/syft ${IMAGE_NAME}:${IMAGE_TAG} -o table > sbom.txt
                 '''
             }
             post {
                 always {
-                    archiveArtifacts artifacts: 'trivy-report.txt', allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'sbom.txt', allowEmptyArchive: true
                 }
             }
         }
@@ -108,21 +123,39 @@ pipeline {
                     passwordVariable: 'HARBOR_PASS'
                 )]) {
                     sh '''
-                        echo "=== Push vers Harbor ==="
-                        echo "${HARBOR_PASS}" | docker login ${HARBOR_HOST} \
-                            -u ${HARBOR_USER} --password-stdin
+                        echo "=== Push Harbor ==="
+                        echo "$HARBOR_PASS" | docker login $HARBOR_HOST \
+                            -u $HARBOR_USER --password-stdin
+
                         docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${FULL_IMAGE}
                         docker push ${FULL_IMAGE}
-                        echo "Image poussée : ${FULL_IMAGE}"
                     '''
                 }
             }
         }
 
-        stage('Déploiement — Ansible') {
+        stage('Sign Image (Cosign)') {
             steps {
                 sh '''
-                    echo "=== Déploiement via Ansible ==="
+                    chmod +x scripts/sign.sh
+                    ./scripts/sign.sh ${FULL_IMAGE}
+                '''
+            }
+        }
+
+        stage('Verify Image') {
+            steps {
+                sh '''
+                    chmod +x scripts/verify.sh
+                    ./scripts/verify.sh ${FULL_IMAGE}
+                '''
+            }
+        }
+
+        stage('Deploy — Ansible') {
+            steps {
+                sh '''
+                    echo "=== Deploy ==="
                     ansible-playbook \
                         -i ansible/inventory.ini \
                         ansible/deploy.yml \
@@ -135,13 +168,13 @@ pipeline {
 
     post {
         success {
-            echo "Pipeline terminé avec succès — image ${FULL_IMAGE} déployée"
+            echo "✅ SUCCESS — ${FULL_IMAGE} déployée"
         }
         failure {
-            echo "Pipeline échoué — vérifier les logs"
+            echo "❌ FAILED — vérifier logs"
         }
         always {
-            sh 'docker image prune -f || true'
+            sh 'docker system prune -f || true'
         }
     }
 }
