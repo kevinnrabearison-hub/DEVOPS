@@ -5,17 +5,17 @@
 
   vars:
     app_dir: "/var/jenkins_home/workspace/mon-projet-devsecops"
-    image_tag: "latest"
+    compose_cmd: "/usr/local/lib/docker/cli-plugins/docker-compose"
 
   tasks:
     - name: Arrêter l'ancienne version
-      shell: docker compose down
+      shell: "{{ compose_cmd }} down || true"
       args:
         chdir: "{{ app_dir }}"
       ignore_errors: true
 
     - name: Lancer la nouvelle version
-      shell: docker compose up -d
+      shell: "{{ compose_cmd }} up -d"
       args:
         chdir: "{{ app_dir }}"
 
@@ -23,18 +23,15 @@
       wait_for:
         host: localhost
         port: 8000
-        delay: 5
-        timeout: 60
+        delay: 10
+        timeout: 120
 
     - name: Vérifier que l'API répond
       uri:
         url: "http://localhost:8000/health"
         return_content: yes
       register: result
-      retries: 5
-      delay: 5
-      until: result.status == 200
 
     - name: Afficher le statut
       debug:
-        msg: "API déployée : {{ result.content }}"
+        msg: "API déployée avec succès : {{ result.content }}"
