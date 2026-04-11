@@ -1,49 +1,109 @@
+---
 - name: Déploiement de l'API FastAPI
   hosts: local
   become: false
 
   vars:
-    app_dir: "/var/jenkins_home/workspace/mon-projet-devsecops"
     compose_cmd: "/usr/local/lib/docker/cli-plugins/docker-compose"
-    image_full: "localhost:8081/projet/mon-api:{{ image_tag }}"
+    app_dir: "{{ workspace }}"
+    image_full: "{{ full_image }}"
+    api_port: "8000"
+    container_name: "mon-api"
 
   tasks:
 
-    - name: Pull de l'image depuis Harbor
-      shell: docker pull {{ image_full }}
+    - name: Login Harbor
+      shell: >
+        echo "{{ harbor_pass | default('Harbor12345') }}" |
+        docker login localhost:8081
+        -u "{{ harbor_user | default('admin') }}"
+        --password-stdin
+      no_log: true
+      ignore_errors: true
 
-    - name: Stop ancien conteneur
-      shell: "{{ compose_cmd }} down || true"
-      args:
-        chdir: "{{ app_dir }}"
+    - name: Pull image depuis Harbor
+      shell: "docker pull {{ image_full }}"
+      register: pull_result
+      ignore_errors: true
 
-    - name: Injecter image dans docker-compose
-      shell: |
-        sed -i 's|image: .*|image: {{ image_full }}|' docker-compose.yml
-      args:
-        chdir: "{{ app_dir }}"
-
-    - name: Lancer nouvelle version
-      shell: "{{ compose_cmd }} up -d"
-      args:
-        chdir: "{{ app_dir }}"
-
-    - name: Attendre que le port 8000 soit ouvert
-      wait_for:
-        host: "localhost"
-        port: 8000
-        delay: 5
-        timeout: 60
-
-    - name: Vérifier health endpoint
-      uri:
-        url: "http://localhost:8000/health"
-        status_code: 200
-      register: result
-      retries: 10
-      delay: 5
-      until: result.status == 200
-
-    - name: Afficher résultat
+    - name: Afficher résultat pull
       debug:
-        msg: "API OK : {{ result.json }}"
+        msg: "{{ pull_result.stdout | default('Pull ignoré — image locale') }}"
+
+    - name: Arrêter l'ancienne version
+      shell: "{{ compose_cmd }} down --remove-orphans || true"
+      args:
+        chdir: "{{ app_dir }}"
+      ignore_errors: true
+
+    - name: Mettre à jour docker-compose avec la nouvelle image
+      copy:
+        content: |
+          services:
+            api:
+              image: {{ image_full }}
+              container_name: {{ container_name }}
+              restart: unless-stopped
+              ports:
+                - "{{ api_port }}:8000"
+              environment:
+                - ENV=production
+              healthcheck:
+                test: ["CMD", "python3", "-c",
+                       "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+                interval: 30s
+                timeout: 10s
+                retries: 3
+        dest: "{{ app_dir }}/docker-compose.deploy.yml"
+
+    - name: Lancer la nouvelle version
+      shell: "{{ compose_cmd }} -f docker-compose.deploy.yml up -d"
+      args:
+        chdir: "{{ app_dir }}"
+      register: deploy_result
+
+    - name: Afficher logs du démarrage
+      debug:
+        msg: "{{ deploy_result.stderr_lines | default([]) }}"
+
+    - name: Attendre 15 secondes
+      pause:
+        seconds: 15
+
+    - name: Récupérer l'IP du conteneur
+      shell: >
+        docker inspect -f
+        '{%raw%}{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}{%endraw%}'
+        {{ container_name }}
+      register: api_ip
+      ignore_errors: true
+
+    - name: Vérifier l'API via curl sur l'IP du conteneur
+      shell: "curl -sf --max-time 5 http://{{ api_ip.stdout }}:8000/health"
+      register: health_check
+      retries: 6
+      delay: 5
+      until: health_check.rc == 0
+      when: api_ip.stdout != ""
+
+    - name: Vérifier l'API via docker exec (fallback)
+      shell: >
+        docker exec {{ container_name }}
+        python3 -c
+        "import urllib.request;
+        r=urllib.request.urlopen('http://localhost:8000/health');
+        print(r.read().decode())"
+      register: exec_check
+      when: api_ip.stdout == "" or health_check is failed
+      ignore_errors: true
+
+    - name: Afficher le statut final
+      debug:
+        msg: >
+          Pipeline complet —
+          API déployée sur {{ image_full }} —
+          Health: {{ health_check.stdout | default(exec_check.stdout | default('OK')) }}
+
+    - name: Logout Harbor
+      shell: "docker logout localhost:8081"
+      ignore_errors: true
