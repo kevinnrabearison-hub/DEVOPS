@@ -86,25 +86,30 @@ pipeline {
         }
 
         // ── Stage 4 : Scan des dépendances ──────────────────────────────────
-        stage('Dependency Scan — Safety') {
-            steps {
-                sh '''
-                    echo "=== Scan dépendances avec Safety ==="
-                    pip3 install safety --break-system-packages -q
-                    safety check \
-                        -r requirements.txt \
-                        --output text \
-                        -o safety-report.txt || true
-                    cat safety-report.txt
-                '''
-            }
-            post {
-                always {
-                    archiveArtifacts artifacts: 'safety-report.txt',
-                                     allowEmptyArchive: true
-                }
-            }
+stage('Dependency Scan — Safety') {
+    steps {
+        sh '''
+            echo "=== Scan dépendances avec Safety ==="
+            export PATH=$PATH:/var/jenkins_home/.local/bin
+            pip3 install safety --break-system-packages -q
+                    export PATH=$PATH:/var/jenkins_home/.local/bin
+
+            # Lance safety avec le bon PATH
+            /var/jenkins_home/.local/bin//var/jenkins_home/.local/bin/safety check \
+                -r requirements.txt \
+                --output text \
+                > safety-report.txt 2>&1 || true
+
+            cat safety-report.txt
+        '''
+    }
+    post {
+        always {
+            archiveArtifacts artifacts: 'safety-report.txt',
+                             allowEmptyArchive: true
         }
+    }
+}
 
         // ── Stage 5 : Build de l'image Docker ───────────────────────────────
         stage('Build Docker Image') {
