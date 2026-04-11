@@ -86,26 +86,19 @@ pipeline {
         }
 
         // ── Stage 4 : Scan des dépendances ──────────────────────────────────
-stage('Dependency Scan — Safety') {
+stage('Dependency Scan — pip-audit') {
     steps {
         sh '''
-            echo "=== Scan dépendances avec Safety ==="
-            export PATH=$PATH:/var/jenkins_home/.local/bin
-            pip3 install safety --break-system-packages -q
-                    export PATH=$PATH:/var/jenkins_home/.local/bin
-
-            # Lance safety avec le bon PATH
-            /var/jenkins_home/.local/bin//var/jenkins_home/.local/bin/safety check \
-                -r requirements.txt \
-                --output text \
-                > safety-report.txt 2>&1 || true
-
-            cat safety-report.txt
+            echo "=== Scan dépendances avec pip-audit ==="
+            pip-audit -r requirements.txt \
+                --format text \
+                -o pip-audit-report.txt || true
+            cat pip-audit-report.txt
         '''
     }
     post {
         always {
-            archiveArtifacts artifacts: 'safety-report.txt',
+            archiveArtifacts artifacts: 'pip-audit-report.txt',
                              allowEmptyArchive: true
         }
     }
