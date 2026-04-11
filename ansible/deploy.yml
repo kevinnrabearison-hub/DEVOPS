@@ -4,15 +4,10 @@
   become: false
 
   vars:
-    app_dir: "/home/{{ ansible_user }}/mon-projet-devsecops"
+    app_dir: "/home/khevin/mon-projet-devsecops"
     image_tag: "latest"
 
   tasks:
-    - name: Copier le docker-compose.yml
-      copy:
-        src: "{{ playbook_dir }}/../docker-compose.yml"
-        dest: "{{ app_dir }}/docker-compose.yml"
-
     - name: Arrêter l'ancienne version
       shell: docker compose down
       args:
@@ -20,9 +15,16 @@
       ignore_errors: true
 
     - name: Lancer la nouvelle version
-      shell: docker compose up -d
+      shell: docker compose up -d --build
       args:
         chdir: "{{ app_dir }}"
+
+    - name: Attendre que l'API démarre
+      wait_for:
+        host: localhost
+        port: 8000
+        delay: 5
+        timeout: 60
 
     - name: Vérifier que l'API répond
       uri:
