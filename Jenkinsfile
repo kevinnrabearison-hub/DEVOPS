@@ -86,23 +86,25 @@ pipeline {
         }
 
         // ── Stage 4 : Scan des dépendances ──────────────────────────────────
-stage('Dependency Scan — pip-audit') {
-    steps {
-        sh '''
-            echo "=== Scan dépendances avec pip-audit ==="
-            pip-audit -r requirements.txt \
-                --format text \
-                -o pip-audit-report.txt || true
-            cat pip-audit-report.txt
-        '''
-    }
-    post {
-        always {
-            archiveArtifacts artifacts: 'pip-audit-report.txt',
-                             allowEmptyArchive: true
-        }
-    }
-}
+        stage('Dependency Scan — pip-audit') {
+                    steps {
+                        sh '''
+                            echo "=== Scan dépendances avec pip-audit ==="
+                            pip3 install pip-audit --break-system-packages -q
+                            AUDIT=$(find /usr /var/jenkins_home/.local -name "pip-audit" 2>/dev/null | head -1)
+                            echo "pip-audit path: $AUDIT"
+                            $AUDIT -r requirements.txt \
+                                --format text > pip-audit-report.txt 2>&1 || true
+                            cat pip-audit-report.txt
+                        '''
+                    }
+                    post {
+                        always {
+                            archiveArtifacts artifacts: 'pip-audit-report.txt',
+                                            allowEmptyArchive: true
+                        }
+                    }
+            }
 
         // ── Stage 5 : Build de l'image Docker ───────────────────────────────
         stage('Build Docker Image') {
