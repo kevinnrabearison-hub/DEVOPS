@@ -44,25 +44,22 @@ pipeline {
             }
         }
 
-        stage('Tests + Coverage') {
-            steps {
-                sh '''
-                    echo "=== Tests ==="
-                    pip3 install -r requirements.txt -r requirements-dev.txt \
-                        --break-system-packages -q
-
-                    pytest tests/ -v \
+stage('Tests') {
+    steps {
+        sh '''
+            docker run --rm \
+                -v $(pwd):/app \
+                -w /app \
+                python:3.13-slim \
+                sh -c "
+                    pip install -r requirements.txt -r requirements-dev.txt &&
+                    python -m pytest tests/ -v \
                         --junitxml=test-results.xml \
                         --cov=src --cov-report=xml
-                '''
-            }
-            post {
-                always {
-                    junit 'test-results.xml'
-                    archiveArtifacts artifacts: 'coverage.xml', allowEmptyArchive: true
-                }
-            }
-        }
+                "
+        '''
+    }
+}
 
         stage('Dependency Scan') {
             steps {
