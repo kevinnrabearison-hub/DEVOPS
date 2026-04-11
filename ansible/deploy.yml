@@ -19,19 +19,27 @@
       args:
         chdir: "{{ app_dir }}"
 
-    - name: Attendre que l'API démarre
-      wait_for:
-        host: localhost
-        port: 8000
-        delay: 10
-        timeout: 120
+    - name: Attendre 10 secondes
+      pause:
+        seconds: 10
+
+    - name: Récupérer l'IP du conteneur mon-api
+      shell: docker inspect -f '{% raw %}{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}{% endraw %}' mon-api
+      register: api_ip
+
+    - name: Afficher l'IP récupérée
+      debug:
+        msg: "IP de l'API : {{ api_ip.stdout }}"
 
     - name: Vérifier que l'API répond
       uri:
-        url: "http://localhost:8000/health"
+        url: "http://{{ api_ip.stdout }}:8000/health"
         return_content: yes
       register: result
+      retries: 5
+      delay: 5
+      until: result.status == 200
 
-    - name: Afficher le statut
+    - name: Afficher le statut final
       debug:
-        msg: "API déployée avec succès : {{ result.content }}"
+        msg: "Pipeline complet — API déployée : {{ result.content }}"
