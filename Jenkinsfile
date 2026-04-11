@@ -87,24 +87,22 @@ pipeline {
 
         // ── Stage 4 : Scan des dépendances ──────────────────────────────────
         stage('Dependency Scan — pip-audit') {
-                    steps {
-                        sh '''
-                            echo "=== Scan dépendances avec pip-audit ==="
-                            pip3 install pip-audit --break-system-packages -q
-                            AUDIT=$(find /usr /var/jenkins_home/.local -name "pip-audit" 2>/dev/null | head -1)
-                            echo "pip-audit path: $AUDIT"
-                            $AUDIT -r requirements.txt \
-                                --format text > pip-audit-report.txt 2>&1 || true
-                            cat pip-audit-report.txt
-                        '''
-                    }
-                    post {
-                        always {
-                            archiveArtifacts artifacts: 'pip-audit-report.txt',
-                                            allowEmptyArchive: true
-                        }
-                    }
+            steps {
+                sh '''
+                    echo "=== Scan dépendances avec pip-audit ==="
+                    pip3 install pip-audit --break-system-packages -q
+                    python3 -m pip_audit -r requirements.txt \
+                        --format text > pip-audit-report.txt 2>&1 || true
+                    cat pip-audit-report.txt
+                '''
             }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'pip-audit-report.txt',
+                                     allowEmptyArchive: true
+                }
+            }
+        }
 
         // ── Stage 5 : Build de l'image Docker ───────────────────────────────
         stage('Build Docker Image') {
@@ -206,10 +204,10 @@ pipeline {
                     sh '''
                         echo "=== Signature image avec Cosign ==="
                         chmod +x scripts/sign.sh
-                        HARBOR_USER=${HARBOR_USER} \
-                        HARBOR_PASS=${HARBOR_PASS} \
-                        HARBOR_HOST=${HARBOR_HOST} \
-                            ./scripts/sign.sh ${FULL_IMAGE}
+                        export HARBOR_USER=${HARBOR_USER}
+                        export HARBOR_PASS=${HARBOR_PASS}
+                        export HARBOR_HOST=${HARBOR_HOST}
+                        ./scripts/sign.sh ${FULL_IMAGE}
                     '''
                 }
             }
@@ -245,10 +243,10 @@ pipeline {
 
     post {
         success {
-            echo "Pipeline terminé avec succès — ${FULL_IMAGE} déployée"
+            sh "echo 'Pipeline terminé avec succès — ${FULL_IMAGE} déployée'"
         }
         failure {
-            echo "Pipeline échoué — consulter les logs Jenkins"
+            sh "echo 'Pipeline échoué — consulter les logs Jenkins'"
         }
         always {
             sh 'docker image prune -f || true'
